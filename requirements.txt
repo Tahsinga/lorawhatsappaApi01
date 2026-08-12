@@ -1,0 +1,5 @@
+pywa>=4.3,<5
+openai>=1.40
+python-dotenv>=1.0
+fastapi>=0.110
+uvicorn[standard]>=0.29

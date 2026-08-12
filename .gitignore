@@ -1,0 +1,20 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env
+.env.*
+
+# Editor/project files
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+
+# Uvicorn reload files
+*.pyc
