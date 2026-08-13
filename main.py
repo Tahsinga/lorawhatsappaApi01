@@ -10,8 +10,10 @@ Run:
   uvicorn main:fastapi_app --host 0.0.0.0 --port 8000 --reload
 """
 
+import base64
 import logging
 import os
+from typing import Any, cast
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -65,8 +67,8 @@ SYSTEM_PROMPT = (
 )
 
 
-async def generate_reply(user_text: str) -> str:
-    """Use GPT-4o Mini to generate a WhatsApp reply."""
+async def generate_text_reply(user_text: str) -> str:
+    """Use GPT-4o Mini to generate a WhatsApp reply for text messages."""
     resp = await llm.chat.completions.create(
         model=MODEL_ID,
         messages=[
@@ -79,21 +81,68 @@ async def generate_reply(user_text: str) -> str:
     return (resp.choices[0].message.content or "").strip()
 
 
-# --- Handle every incoming text message -------------------------------------
+async def extract_receipt_text(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    """OCR a receipt/invoice image with GPT-4o Mini and return the text."""
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+    data_url = f"data:{mime_type};base64,{image_base64}"
+
+    prompt = (
+        "You are an OCR assistant. Read this receipt/invoice and transcribe it. "
+        "Return in plain text: business name; invoice number and date; each line item "
+        "(quantity, description, unit price, line total); and the total. "
+        "Preserve all numbers exactly as written. Mark anything unreadable as [unclear]. "
+        "Keep it compact for WhatsApp."
+    )
+
+    resp = await llm.chat.completions.create(
+        model=MODEL_ID,
+        messages=cast(Any, [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url, "detail": "high"},
+                    },
+                ],
+            }
+        ]),
+        max_tokens=600,
+    )
+
+    return (resp.choices[0].message.content or "").strip()
+
+
+# --- Handle every incoming text and image message -------------------------
 @wa.on_message()  # type: ignore[arg-type]  # pywa async-stub quirk; verified correct at runtime
 async def handle_message(_: WhatsApp, msg: types.Message):
     log.debug("Entered handle_message handler")
     log.info("Message from %s: %s", msg.from_user.wa_id, msg.text)
 
+    if msg.image is not None:
+        try:
+            image_bytes = await msg.image.get_bytes()
+            reply = await extract_receipt_text(image_bytes, msg.image.mime_type or "image/jpeg")
+        except Exception:
+            log.exception("Image OCR failed")
+            reply = "Sorry, I couldn't read that image. Please send a different picture."
+
+        try:
+            await msg.reply_text(reply)
+        except Exception:
+            log.exception("Failed to send image reply to WhatsApp")
+        return
+
     if not msg.text:
-        await msg.reply_text("I can only read text messages right now 🙂")
+        await msg.reply_text("I can only read text and image messages right now 🙂")
         return
 
     try:
-        reply = await generate_reply(msg.text)
+        reply = await generate_text_reply(msg.text)
     except Exception:
         log.exception("LLM call failed")
-        reply = "Sorry, I hit a snag. Please try again in a moment."
+        reply = "Hello my name is Tashinga"
 
     try:
         await msg.reply_text(reply)
