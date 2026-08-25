@@ -142,7 +142,7 @@ async def handle_message(_: WhatsApp, msg: types.Message):
         reply = await generate_text_reply(msg.text)
     except Exception:
         log.exception("LLM call failed")
-        reply = "Hello my name is Tashinga"
+        reply = "Sorry, I hit a snag. Please try again in a moment."
 
     try:
         await msg.reply_text(reply)
