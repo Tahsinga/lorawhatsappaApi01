@@ -1,0 +1,199 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp Control Room</title>
+  <style>
+    :root {
+      --ink: #18201d;
+      --muted: #748078;
+      --line: #dce4de;
+      --paper: #fbfcfa;
+      --panel: #ffffff;
+      --green: #1d7658;
+      --green-soft: #e2f1e9;
+      --amber: #b36d2d;
+      --shadow: 0 16px 42px rgba(26, 55, 42, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: linear-gradient(135deg, #e9f3ed 0%, #f7f3e9 52%, #e8f0f4 100%);
+      font: 15px/1.5 Georgia, "Times New Roman", serif;
+    }
+    button, input { font: inherit; }
+    .shell { width: min(1340px, calc(100% - 44px)); margin: 0 auto; padding: 34px 0 54px; }
+    .topbar { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 25px; }
+    .eyebrow { margin: 0 0 8px; color: var(--green); font: 700 11px/1.2 ui-sans-serif, system-ui, sans-serif; letter-spacing: .17em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.65rem); font-weight: 400; letter-spacing: -.055em; line-height: .98; }
+    .subtitle { max-width: 520px; margin: 12px 0 0; color: var(--muted); font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+    .live { display: flex; align-items: center; gap: 9px; color: var(--green); font: 700 12px ui-sans-serif, system-ui, sans-serif; white-space: nowrap; }
+    .live-dot { width: 9px; height: 9px; border-radius: 50%; background: #36a76d; box-shadow: 0 0 0 5px #d1ecdc; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .stat { padding: 17px 19px; border: 1px solid rgba(220, 228, 222, .9); border-radius: 11px; background: rgba(255, 255, 255, .74); box-shadow: 0 8px 22px rgba(26, 55, 42, .04); }
+    .stat-label { color: var(--muted); font: 11px ui-sans-serif, system-ui, sans-serif; letter-spacing: .09em; text-transform: uppercase; }
+    .stat-value { margin-top: 3px; font-size: 25px; }
+    .workspace { display: grid; grid-template-columns: 330px minmax(0, 1fr); min-height: 590px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); }
+    .sidebar { border-right: 1px solid var(--line); background: #f7faf8; }
+    .sidebar-head { padding: 18px; border-bottom: 1px solid var(--line); }
+    .sidebar-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 13px; font-size: 19px; }
+    .sidebar-title span { color: var(--muted); font: 11px ui-sans-serif, system-ui, sans-serif; }
+    .search { width: 100%; padding: 10px 12px; border: 1px solid #d4dfd8; border-radius: 7px; outline: none; background: #fff; color: var(--ink); font: 13px ui-sans-serif, system-ui, sans-serif; }
+    .search:focus { border-color: var(--green); box-shadow: 0 0 0 3px #d9eee3; }
+    .contacts { max-height: 600px; overflow-y: auto; }
+    .contact { display: block; width: 100%; padding: 16px 18px; border: 0; border-bottom: 1px solid #e5ece7; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+    .contact:hover, .contact.selected { background: #e7f2ec; }
+    .contact-row { display: flex; align-items: center; gap: 11px; }
+    .avatar { display: grid; flex: 0 0 36px; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: #d5e9df; color: var(--green); font: 700 14px ui-sans-serif, system-ui, sans-serif; }
+    .contact-name { overflow: hidden; font: 700 14px ui-sans-serif, system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+    .contact-preview { overflow: hidden; margin: 2px 0 0 47px; color: var(--muted); font: 12px ui-sans-serif, system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation { display: flex; flex-direction: column; min-width: 0; background: var(--paper); }
+    .conversation-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 24px; border-bottom: 1px solid var(--line); background: #fff; }
+    .person { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .person h2 { overflow: hidden; margin: 0; font-size: 20px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+    .person p { margin: 2px 0 0; color: var(--muted); font: 12px ui-sans-serif, system-ui, sans-serif; }
+    .refresh { padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--green); cursor: pointer; font: 700 12px ui-sans-serif, system-ui, sans-serif; }
+    .refresh:hover { border-color: var(--green); }
+    .messages { display: flex; flex: 1; flex-direction: column; gap: 17px; padding: 25px; overflow-y: auto; background-image: radial-gradient(#d8e4dc 1px, transparent 1px); background-size: 20px 20px; }
+    .composer { display: flex; gap: 10px; padding: 15px 20px; border-top: 1px solid var(--line); background: #fff; }
+    .composer textarea { flex: 1; min-height: 43px; max-height: 120px; resize: vertical; padding: 11px 12px; border: 1px solid #d4dfd8; border-radius: 7px; outline: none; color: var(--ink); font: 13px ui-sans-serif, system-ui, sans-serif; }
+    .composer textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px #d9eee3; }
+    .send { align-self: end; padding: 11px 16px; border: 0; border-radius: 7px; background: var(--green); color: #fff; cursor: pointer; font: 700 12px ui-sans-serif, system-ui, sans-serif; }
+    .send:hover { background: #155c44; }
+    .send:disabled { opacity: .55; cursor: wait; }
+    .send-status { align-self: center; color: var(--muted); font: 11px ui-sans-serif, system-ui, sans-serif; }
+    .message { display: flex; flex-direction: column; max-width: min(640px, 78%); align-self: flex-start; }
+    .message.outgoing { align-self: flex-end; align-items: flex-end; }
+    .bubble { padding: 12px 15px; border: 1px solid #dce6df; border-radius: 4px 13px 13px 13px; background: #fff; box-shadow: 0 4px 12px rgba(35, 63, 49, .04); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .outgoing .bubble { border-color: #c7e3d3; border-radius: 13px 4px 13px 13px; background: var(--green-soft); }
+    .message-meta { margin: 5px 4px 0; color: var(--muted); font: 10px ui-sans-serif, system-ui, sans-serif; }
+    .empty { display: grid; flex: 1; place-items: center; padding: 40px; color: var(--muted); text-align: center; font: 14px ui-sans-serif, system-ui, sans-serif; }
+    @media (max-width: 760px) {
+      .shell { width: min(100% - 24px, 620px); padding-top: 22px; }
+      .topbar { align-items: start; flex-direction: column; gap: 17px; }
+      .stats { gap: 8px; }
+      .stat { padding: 13px; }
+      .stat-value { font-size: 21px; }
+      .workspace { grid-template-columns: 1fr; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .contacts { display: flex; max-height: none; overflow-x: auto; }
+      .contact { min-width: 215px; border-right: 1px solid #e5ece7; }
+      .conversation { min-height: 530px; }
+      .messages { padding: 18px 14px; }
+      .message { max-width: 88%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Operations / WhatsApp</p>
+        <h1>Conversation control room</h1>
+        <p class="subtitle">Keep an eye on incoming customer messages and the replies your assistant sends back.</p>
+      </div>
+      <div class="live"><span class="live-dot"></span><span>Live monitoring</span></div>
+    </header>
+
+    <section class="stats" aria-label="Conversation statistics">
+      <div class="stat"><div class="stat-label">Total messages</div><div class="stat-value" id="total-count">--</div></div>
+      <div class="stat"><div class="stat-label">Customers</div><div class="stat-value" id="customer-count">--</div></div>
+      <div class="stat"><div class="stat-label">Bot replies</div><div class="stat-value" id="reply-count">--</div></div>
+    </section>
+
+    <section class="workspace">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <div class="sidebar-title">Conversations <span id="sync-status">Syncing...</span></div>
+          <input class="search" id="search" type="search" placeholder="Search phone numbers" aria-label="Search conversations">
+        </div>
+        <div class="contacts" id="contacts"><div class="empty">Loading conversations...</div></div>
+      </aside>
+      <section class="conversation">
+        <header class="conversation-head">
+          <div class="person"><div class="avatar" id="active-avatar">?</div><div><h2 id="active-name">Select a conversation</h2><p id="active-detail">Your WhatsApp activity will appear here</p></div></div>
+          <button class="refresh" id="refresh" type="button">Refresh</button>
+        </header>
+        <div class="messages" id="messages"><div class="empty">Choose a customer on the left to view the conversation.</div></div>
+        <form class="composer" id="composer">
+          {% csrf_token %}
+          <textarea id="reply-body" placeholder="Write a reply..." aria-label="Reply message" maxlength="4096" disabled></textarea>
+          <span class="send-status" id="send-status"></span>
+          <button class="send" id="send" type="submit" disabled>Send</button>
+        </form>
+      </section>
+    </section>
+  </main>
+  <script>
+    const contacts = document.getElementById('contacts');
+    const messages = document.getElementById('messages');
+    const search = document.getElementById('search');
+    const replyBody = document.getElementById('reply-body');
+    const sendButton = document.getElementById('send');
+    const sendStatus = document.getElementById('send-status');
+    let allMessages = [];
+    let activeWaId = null;
+
+    function escapeHtml(value) { const node = document.createElement('div'); node.textContent = value ?? ''; return node.innerHTML; }
+    function timeLabel(ts) { return new Intl.DateTimeFormat([], { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ts * 1000)); }
+    function grouped() {
+      const map = new Map();
+      allMessages.forEach(item => { if (!map.has(item.wa_id)) map.set(item.wa_id, []); map.get(item.wa_id).push(item); });
+      return [...map.entries()].map(([waId, items]) => ({ waId, items, latest: items[items.length - 1] }));
+    }
+    function renderContacts() {
+      const query = search.value.trim().toLowerCase();
+      const rows = grouped().filter(row => row.waId.toLowerCase().includes(query));
+      if (!rows.length) { contacts.innerHTML = '<div class="empty">No conversations yet.</div>'; return; }
+      if (!activeWaId || !rows.some(row => row.waId === activeWaId)) activeWaId = rows[0].waId;
+      contacts.innerHTML = rows.map(row => `<button class="contact ${row.waId === activeWaId ? 'selected' : ''}" data-wa-id="${escapeHtml(row.waId)}"><div class="contact-row"><div class="avatar">${escapeHtml(row.waId.slice(-2))}</div><div class="contact-name">${escapeHtml(row.waId)}</div></div><div class="contact-preview">${escapeHtml(row.latest.body)}</div></button>`).join('');
+      contacts.querySelectorAll('.contact').forEach(button => button.addEventListener('click', () => { activeWaId = button.dataset.waId; renderContacts(); renderConversation(); }));
+    }
+    function renderConversation() {
+      const items = allMessages.filter(item => item.wa_id === activeWaId);
+      if (!items.length) { messages.innerHTML = '<div class="empty">Choose a customer on the left to view the conversation.</div>'; return; }
+      replyBody.disabled = false; sendButton.disabled = false;
+      document.getElementById('active-name').textContent = activeWaId;
+      document.getElementById('active-detail').textContent = `${items.length} message${items.length === 1 ? '' : 's'} in this conversation`;
+      document.getElementById('active-avatar').textContent = activeWaId.slice(-2);
+      messages.innerHTML = items.map(item => `<article class="message ${item.direction === 'outgoing' ? 'outgoing' : ''}"><div class="bubble">${escapeHtml(item.body)}</div><div class="message-meta">${item.direction === 'outgoing' ? 'Bot reply' : 'Customer'} · ${timeLabel(item.ts)}</div></article>`).join('');
+      messages.scrollTop = messages.scrollHeight;
+    }
+    async function sendReply(event) {
+      event.preventDefault();
+      const body = replyBody.value.trim();
+      if (!activeWaId || !body) return;
+      sendButton.disabled = true; replyBody.disabled = true; sendStatus.textContent = 'Sending...';
+      try {
+        const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        const response = await fetch('/api/reply/', { method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf}, body: JSON.stringify({wa_id: activeWaId, body}) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Message could not be sent.');
+        replyBody.value = ''; sendStatus.textContent = 'Sent'; await loadMessages();
+      } catch (error) { sendStatus.textContent = error.message; }
+      finally { replyBody.disabled = false; sendButton.disabled = false; replyBody.focus(); setTimeout(() => { sendStatus.textContent = ''; }, 5000); }
+    }
+    async function loadMessages() {
+      try {
+        const response = await fetch('/api/messages/', { cache: 'no-store' });
+        const data = await response.json();
+        allMessages = data.messages || [];
+        document.getElementById('total-count').textContent = allMessages.length;
+        document.getElementById('customer-count').textContent = grouped().length;
+        document.getElementById('reply-count').textContent = allMessages.filter(item => item.direction === 'outgoing').length;
+        document.getElementById('sync-status').textContent = 'Updated now';
+        renderContacts(); renderConversation();
+      } catch (error) { document.getElementById('sync-status').textContent = 'Offline'; }
+    }
+    search.addEventListener('input', renderContacts);
+    document.getElementById('refresh').addEventListener('click', loadMessages);
+    document.getElementById('composer').addEventListener('submit', sendReply);
+    loadMessages();
+    setInterval(loadMessages, 5000);
+  </script>
+</body>
+</html>

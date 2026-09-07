@@ -182,19 +182,19 @@ async def handle_message(_: WhatsApp, msg: types.Message):
 
     try:
         await msg.reply_text(reply)
-                log_conversation(sender_id, "outgoing", "text", reply)
+        log_conversation(sender_id, "outgoing", "text", reply)
     except Exception:
         log.exception("Failed to send reply to WhatsApp")
 
 
 @fastapi_app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
-        return HTMLResponse(DASHBOARD_HTML)
+    return HTMLResponse(DASHBOARD_HTML)
 
 
 @fastapi_app.get("/dashboard/messages")
 async def dashboard_messages():
-        return {"messages": list_conversations()}
+    return {"messages": list_conversations()}
 
 
 DASHBOARD_HTML = """<!doctype html>

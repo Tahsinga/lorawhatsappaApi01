@@ -3,3 +3,4 @@ openai>=1.40
 python-dotenv>=1.0
 fastapi>=0.110
 uvicorn[standard]>=0.29
+Django>=5.2,<6
