@@ -68,6 +68,15 @@ def init_db() -> None:
                 delta REAL, reason TEXT, actor_wa TEXT, note TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_mov ON movements(branch, sku);
+            CREATE TABLE IF NOT EXISTS conversations(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                wa_id TEXT NOT NULL,
+                direction TEXT NOT NULL CHECK(direction IN ('incoming', 'outgoing')),
+                message_type TEXT NOT NULL,
+                body TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversations_ts ON conversations(ts DESC);
             """
         )
         
@@ -95,6 +104,26 @@ class User:
     name: str
     branch: str
     role: str
+
+
+def log_conversation(wa_id: str, direction: str, message_type: str, body: str) -> None:
+    """Persist one inbound or outbound WhatsApp message for the dashboard."""
+    with _write_lock, closing(_conn()) as c, c:
+        c.execute(
+            "INSERT INTO conversations(ts,wa_id,direction,message_type,body) VALUES(?,?,?,?,?)",
+            (int(time.time()), wa_id, direction, message_type, body),
+        )
+
+
+def list_conversations(limit: int = 100):
+    """Return recent messages in chronological order for the dashboard."""
+    with closing(_conn()) as c:
+        rows = c.execute(
+            "SELECT id,ts,wa_id,direction,message_type,body "
+            "FROM conversations ORDER BY ts DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in reversed(rows)]
 
 
 def get_user(wa_id: str) -> User | None:
