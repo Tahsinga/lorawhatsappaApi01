@@ -30,7 +30,7 @@ SECRET_KEY = 'django-insecure-o0h9y+4l@7&hxnupg8f4959ipa6(#p(=19#(0$k91m0)89rw#m
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'testserver']
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'testserver', '192.168.110.87']
 
 
 # Application definition
@@ -124,6 +124,7 @@ STATIC_URL = 'static/'
 
 # The bot stores webhook conversations in the project-level SQLite database.
 WHATSAPP_DB_PATH = BASE_DIR.parent.parent / 'stock.db'
+WHATSAPP_MEDIA_DIR = PROJECT_DIR / 'media'
 WA_PHONE_ID = os.getenv('WA_PHONE_ID', '')
 WA_TOKEN = os.getenv('WA_TOKEN', '')
 

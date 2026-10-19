@@ -14,6 +14,7 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+
 from django.contrib import admin
 from django.urls import path
 from webui import views
@@ -22,5 +23,6 @@ urlpatterns = [
     path('', views.inbox, name='inbox'),
     path('api/messages/', views.messages_api, name='messages_api'),
     path('api/reply/', views.reply_api, name='reply_api'),
+    path('media/messages/<str:filename>', views.message_media, name='message_media'),
     path('admin/', admin.site.urls),
 ]

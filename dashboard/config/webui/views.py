@@ -1,11 +1,13 @@
 import json
+import mimetypes
 import sqlite3
 import time
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.views.decorators.http import require_POST
 from django.shortcuts import render
 
@@ -25,7 +27,19 @@ def _messages():
 		rows = []
 	finally:
 		connection.close()
-	return [dict(row) for row in rows]
+	messages = [dict(row) for row in rows]
+	messages = [
+		message for message in messages
+		if message['message_type'] not in ('image', 'audio')
+		or (Path(message['body']).name == message['body'] and
+			(settings.WHATSAPP_MEDIA_DIR / message['body']).is_file())
+	]
+	for message in messages:
+		if message['message_type'] == 'image':
+			message['image_url'] = f"/media/messages/{message['body']}"
+		elif message['message_type'] == 'audio':
+			message['audio_url'] = f"/media/messages/{message['body']}"
+	return messages
 
 
 def inbox(request):
@@ -34,6 +48,21 @@ def inbox(request):
 
 def messages_api(request):
 	return JsonResponse({'messages': _messages()})
+
+
+def message_media(request, filename):
+	if Path(filename).name != filename:
+		raise Http404
+	file_path = settings.WHATSAPP_MEDIA_DIR / filename
+	if not file_path.is_file():
+		raise Http404
+	content_type = mimetypes.guess_type(file_path.name)[0] or 'application/octet-stream'
+	if file_path.suffix.lower() == '.ogg':
+		content_type = 'audio/ogg'
+	response = FileResponse(file_path.open('rb'), content_type=content_type)
+	if request.GET.get('download') == '1':
+		response['Content-Disposition'] = f'attachment; filename="{file_path.name}"'
+	return response
 
 
 def _record_outgoing(wa_id, body):
