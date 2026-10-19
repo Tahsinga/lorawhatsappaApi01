@@ -158,33 +158,34 @@ def transfer_reply(branch: str, transfer_date: str, transfers: list[dict[str, An
         display_date = transfer_date
     if not transfers:
         return [
-            f"📦 *STOCK RECEIVED TODAY*\n🏬 *{branch}*\n📅 {display_date}\n\n"
-            "No stock has been recorded as received today.\n\n"
+            f"📦 *STOCK SENT TODAY*\n🏬 *{branch}*\n📅 {display_date}\n\n"
+            "No stock transfers were sent to this branch today.\n\n"
             "Reply 1 to check again, 2 to choose another branch, or MENU to start again."
         ]
 
     total_quantity = sum(int(Decimal(str(item.get("quantity", 0)))) for item in transfers)
     heading = (
-        f"📦 *STOCK RECEIVED TODAY*\n🏬 *{branch}*\n📅 {display_date}\n"
+        f"📦 *STOCK SENT TODAY*\n🏬 *{branch}*\n📅 {display_date}\n"
         f"📊 {len(transfers)} deliveries · {total_quantity} units total\n\n"
     )
     entries = []
     for transfer in transfers:
         product = transfer.get("product_name") or f"Product {transfer.get('product_id', '')}"
-        timestamp = str(transfer.get("received_at", ""))
+        timestamp = str(transfer.get("sent_at", ""))
         try:
             timestamp = datetime.fromisoformat(timestamp).strftime("%I:%M %p").lstrip("0")
         except ValueError:
             timestamp = "Time unavailable"
+        status = str(transfer.get("status", "sent")).replace("_", " ").title()
         entries.append(
-            f"🕒 *{timestamp}*\n"
-            f"🍞 *{product}*\n"
-            f"   Received: *{transfer.get('quantity', '?')}*\n"
+            f"📦 *{product}*\n"
+            f"   Quantity: *{transfer.get('quantity', '?')}*\n"
+            f"   Sent: *{timestamp}* · {status}\n"
         )
 
     pages = []
     current = heading
-    continued_heading = f"📦 *STOCK RECEIVED TODAY · CONTINUED*\n🏬 *{branch}*\n📅 {display_date}\n\n"
+    continued_heading = f"📦 *STOCK SENT TODAY · CONTINUED*\n🏬 *{branch}*\n📅 {display_date}\n\n"
     for entry in entries:
         if len(current) + len(entry) > 3300:
             pages.append(current.rstrip())
