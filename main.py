@@ -140,14 +140,18 @@ async def fetch_stock_data(params: dict[str, str]) -> dict[str, Any]:
 async def branch_menu(greeting: bool = False) -> str:
     payload = await fetch_stock_data({"action": "branches"})
     branches = payload.get("branches", [])
+    heading = "👋 *WELCOME TO LORA RETURNS CONNECT*\n\n" if greeting else ""
     if not branches:
-        return "Hi! Welcome to Lora Returns Connect. I couldn't find any branches in the live stock system."
+        return (
+            f"{heading}📦 *STOCK SENT TODAY*\n\n"
+            "I couldn't find any branches in the live stock system. Please try again later."
+        )
     lines = [
-        "Hi! Welcome to Lora Returns Connect.\n" if greeting else "Choose a branch:\n",
-        "Choose a branch by replying with its number or exact name:\n",
+        f"{heading}📦 *STOCK SENT TODAY*\n🏬 *CHOOSE A BRANCH*\n\n",
+        "Select a branch to view today's transfers:\n\n",
     ]
-    lines.extend(f"{index}. {name}" for index, name in enumerate(branches, start=1))
-    lines.append("\nReply MENU at any time to start again.")
+    lines.extend(f"🏪 *{index}. {name}*\n" for index, name in enumerate(branches, start=1))
+    lines.append("\nReply with a branch number or exact name.\nType MENU to start again.")
     return "".join(lines)
 
 
