@@ -12,19 +12,24 @@ Run:
 
 import base64
 import logging
+import mimetypes
 import os
+import uuid
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from openai import AsyncOpenAI
 from pywa_async import WhatsApp, types
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from store import init_db, list_conversations, log_conversation
+from store import get_bot_session, init_db, list_conversations, log_conversation, set_bot_session
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
 logging.basicConfig(
@@ -37,6 +42,8 @@ log = logging.getLogger("wa-bot")
 log.setLevel(logging.DEBUG)
 if not any(isinstance(handler, logging.FileHandler) for handler in log.handlers):
     log.addHandler(logging.FileHandler(Path(__file__).with_name("webhook.log"), encoding="utf-8"))
+
+MEDIA_DIR = Path(__file__).with_name("media")
 
 
 def required_env(name: str) -> str:
@@ -89,6 +96,11 @@ wa = WhatsApp(
 # --- The brain: GPT-4o Mini via OpenAI API -----------------------------
 llm = AsyncOpenAI(api_key=required_env("MODEL_API_KEY"))
 MODEL_ID = os.getenv("MODEL_ID", "gpt-4o-mini")
+STOCK_API_URL = os.getenv(
+    "LORA_STOCK_API_URL",
+    "https://laxdomloraapi.onrender.com/api/whatsapp/stock/",
+).rstrip("/") + "/"
+STOCK_API_TOKEN = os.getenv("WHATSAPP_STOCK_API_TOKEN", "")
 SYSTEM_PROMPT = (
     "You are a helpful assistant for a WhatsApp business bot. "
     "Reply warmly and briefly, and acknowledge the user message." 
@@ -107,6 +119,136 @@ async def generate_text_reply(user_text: str) -> str:
         temperature=0.7,
     )
     return (resp.choices[0].message.content or "").strip()
+
+
+async def fetch_stock_data(params: dict[str, str]) -> dict[str, Any]:
+    if not STOCK_API_TOKEN:
+        raise RuntimeError("WHATSAPP_STOCK_API_TOKEN is not configured")
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.get(
+            STOCK_API_URL,
+            params=params,
+            headers={"X-WhatsApp-Token": STOCK_API_TOKEN},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    if payload.get("status") != "ok":
+        raise RuntimeError("Stock API returned an unsuccessful response")
+    return payload
+
+
+async def branch_menu(greeting: bool = False) -> str:
+    payload = await fetch_stock_data({"action": "branches"})
+    branches = payload.get("branches", [])
+    if not branches:
+        return "Hi! Welcome to Lora Returns Connect. I couldn't find any branches in the live stock system."
+    lines = [
+        "Hi! Welcome to Lora Returns Connect.\n" if greeting else "Choose a branch:\n",
+        "Choose a branch by replying with its number or exact name:\n",
+    ]
+    lines.extend(f"{index}. {name}" for index, name in enumerate(branches, start=1))
+    lines.append("\nReply MENU at any time to start again.")
+    return "".join(lines)
+
+
+def transfer_reply(branch: str, transfer_date: str, transfers: list[dict[str, Any]]) -> list[str]:
+    try:
+        display_date = datetime.fromisoformat(transfer_date).strftime("%A, %d %B %Y")
+    except ValueError:
+        display_date = transfer_date
+    if not transfers:
+        return [
+            f"📦 *STOCK RECEIVED TODAY*\n🏬 *{branch}*\n📅 {display_date}\n\n"
+            "No stock has been recorded as received today.\n\n"
+            "Reply 1 to check again, 2 to choose another branch, or MENU to start again."
+        ]
+
+    total_quantity = sum(int(Decimal(str(item.get("quantity", 0)))) for item in transfers)
+    heading = (
+        f"📦 *STOCK RECEIVED TODAY*\n🏬 *{branch}*\n📅 {display_date}\n"
+        f"📊 {len(transfers)} deliveries · {total_quantity} units total\n\n"
+    )
+    entries = []
+    for transfer in transfers:
+        product = transfer.get("product_name") or f"Product {transfer.get('product_id', '')}"
+        timestamp = str(transfer.get("received_at", ""))
+        try:
+            timestamp = datetime.fromisoformat(timestamp).strftime("%I:%M %p").lstrip("0")
+        except ValueError:
+            timestamp = "Time unavailable"
+        entries.append(
+            f"🕒 *{timestamp}*\n"
+            f"🍞 *{product}*\n"
+            f"   Received: *{transfer.get('quantity', '?')}*\n"
+        )
+
+    pages = []
+    current = heading
+    continued_heading = f"📦 *STOCK RECEIVED TODAY · CONTINUED*\n🏬 *{branch}*\n📅 {display_date}\n\n"
+    for entry in entries:
+        if len(current) + len(entry) > 3300:
+            pages.append(current.rstrip())
+            current = continued_heading
+        current += entry + "\n"
+    current += "Reply 1 to refresh, 2 to choose another branch, or MENU to start again."
+    pages.append(current.rstrip())
+    return pages
+
+
+async def stock_menu_reply(sender_id: str, user_text: str) -> str:
+    normalized = user_text.strip().casefold()
+    session = get_bot_session(sender_id)
+
+    if normalized in {"menu", "start"} or not session:
+        set_bot_session(sender_id, "choose_branch")
+        try:
+            return await branch_menu(greeting=True)
+        except Exception:
+            log.exception("Failed to load branches from live stock API")
+            return "Hi! Welcome to Lora Returns Connect. I can't reach the live stock system right now. Please try again shortly."
+
+    if session["stage"] == "choose_branch":
+        try:
+            branches = (await fetch_stock_data({"action": "branches"})).get("branches", [])
+        except Exception:
+            log.exception("Failed to load branches from live stock API")
+            return "I can't reach the live stock system right now. Please try again shortly."
+        selected = None
+        if normalized.isdigit():
+            index = int(normalized) - 1
+            if 0 <= index < len(branches):
+                selected = branches[index]
+        else:
+            selected = next((name for name in branches if name.casefold() == normalized), None)
+        if selected is None:
+            return "Please reply with a listed branch number or its exact name.\n\n" + "\n".join(
+                f"{index}. {name}" for index, name in enumerate(branches, start=1)
+            )
+        set_bot_session(sender_id, "choose_action", selected)
+        return (
+            f"You selected {selected}. What would you like to do?\n"
+            "1. See what stock was transferred to this branch"
+        )
+
+    branch = session.get("branch", "")
+    if normalized in {"2", "branch", "change branch"}:
+        set_bot_session(sender_id, "choose_branch")
+        try:
+            return await branch_menu()
+        except Exception:
+            log.exception("Failed to load branches from live stock API")
+            return "I can't reach the live stock system right now. Please try again shortly."
+    if normalized in {"1", "transfers", "transfer", "stock", "view", "see"}:
+        try:
+            payload = await fetch_stock_data({"branch": branch})
+            return transfer_reply(branch, payload.get("date", "Today"), payload.get("transfers", []))
+        except Exception:
+            log.exception("Failed to load branch transfers from live stock API")
+            return "I can't load transfers from the live stock system right now. Please try again shortly."
+    return (
+        "Reply 1 to see transfers for this branch, 2 to choose another branch, "
+        "or MENU to start again."
+    )
 
 
 async def extract_receipt_text(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
@@ -142,23 +284,36 @@ async def extract_receipt_text(image_bytes: bytes, mime_type: str = "image/jpeg"
     return (resp.choices[0].message.content or "").strip()
 
 
-# --- Handle every incoming text and image message -------------------------
+# --- Handle every incoming text, image, and audio message ------------------
 @wa.on_message()  # type: ignore[arg-type]  # pywa async-stub quirk; verified correct at runtime
 async def handle_message(_: WhatsApp, msg: types.Message):
     log.debug("Entered handle_message handler")
     log.info("Message from %s: %s", msg.from_user.wa_id, msg.text)
 
     sender_id = str(msg.from_user.wa_id)
-    incoming_type = "image" if msg.image is not None else "text"
-    incoming_body = msg.text or ("Image received" if msg.image is not None else "Unsupported message")
-    log_conversation(sender_id, "incoming", incoming_type, incoming_body)
+    incoming_type = "image" if msg.image is not None else ("audio" if msg.audio is not None else "text")
+    incoming_body = msg.text or (
+        "Image received" if msg.image is not None else
+        "Audio received" if msg.audio is not None else
+        "Unsupported message"
+    )
 
     if msg.image is not None:
+        image_logged = False
         try:
             image_bytes = await msg.image.get_bytes()
-            reply = await extract_receipt_text(image_bytes, msg.image.mime_type or "image/jpeg")
+            mime_type = msg.image.mime_type or "image/jpeg"
+            extension = mimetypes.guess_extension(mime_type) or ".jpg"
+            filename = f"{uuid.uuid4().hex}{extension}"
+            MEDIA_DIR.mkdir(exist_ok=True)
+            (MEDIA_DIR / filename).write_bytes(image_bytes)
+            log_conversation(sender_id, "incoming", incoming_type, filename)
+            image_logged = True
+            reply = await extract_receipt_text(image_bytes, mime_type)
         except Exception:
             log.exception("Image OCR failed")
+            if not image_logged:
+                log_conversation(sender_id, "incoming", incoming_type, incoming_body)
             reply = "Sorry, I couldn't read that image. Please send a different picture."
 
         try:
@@ -168,6 +323,32 @@ async def handle_message(_: WhatsApp, msg: types.Message):
             log.exception("Failed to send image reply to WhatsApp")
         return
 
+    if msg.audio is not None:
+        audio_logged = False
+        try:
+            audio_bytes = await msg.audio.get_bytes()
+            mime_type = msg.audio.mime_type or "audio/ogg"
+            extension = mimetypes.guess_extension(mime_type) or ".ogg"
+            filename = f"{uuid.uuid4().hex}{extension}"
+            MEDIA_DIR.mkdir(exist_ok=True)
+            (MEDIA_DIR / filename).write_bytes(audio_bytes)
+            log_conversation(sender_id, "incoming", "audio", filename)
+            audio_logged = True
+        except Exception:
+            log.exception("Audio download failed")
+            if not audio_logged:
+                log_conversation(sender_id, "incoming", "audio", incoming_body)
+
+        reply = "I received your audio message."
+        try:
+            await msg.reply_text(reply)
+            log_conversation(sender_id, "outgoing", "text", reply)
+        except Exception:
+            log.exception("Failed to send audio reply to WhatsApp")
+        return
+
+    log_conversation(sender_id, "incoming", incoming_type, incoming_body)
+
     if not msg.text:
         reply = "I can only read text and image messages right now."
         await msg.reply_text(reply)
@@ -175,16 +356,28 @@ async def handle_message(_: WhatsApp, msg: types.Message):
         return
 
     try:
-        reply = await generate_text_reply(msg.text)
+        reply = await stock_menu_reply(sender_id, msg.text)
     except Exception:
-        log.exception("LLM call failed")
+        log.exception("WhatsApp stock menu failed")
         reply = "Sorry, I hit a snag. Please try again in a moment."
 
     try:
-        await msg.reply_text(reply)
-        log_conversation(sender_id, "outgoing", "text", reply)
+        replies = reply if isinstance(reply, list) else [reply]
+        for outgoing_reply in replies:
+            await msg.reply_text(outgoing_reply)
+            log_conversation(sender_id, "outgoing", "text", outgoing_reply)
     except Exception:
         log.exception("Failed to send reply to WhatsApp")
+
+
+@fastapi_app.get("/", include_in_schema=False)
+async def home():
+    return RedirectResponse(url="/dashboard")
+
+
+@fastapi_app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
 
 
 @fastapi_app.get("/dashboard", response_class=HTMLResponse)

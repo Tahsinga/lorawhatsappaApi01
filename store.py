@@ -77,6 +77,12 @@ def init_db() -> None:
                 body TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_conversations_ts ON conversations(ts DESC);
+            CREATE TABLE IF NOT EXISTS bot_sessions(
+                wa_id TEXT PRIMARY KEY,
+                stage TEXT NOT NULL,
+                branch TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL
+            );
             """
         )
         
@@ -124,6 +130,25 @@ def list_conversations(limit: int = 100):
             (limit,),
         ).fetchall()
     return [dict(row) for row in reversed(rows)]
+
+
+def get_bot_session(wa_id: str):
+    with closing(_conn()) as c:
+        row = c.execute(
+            "SELECT stage, branch FROM bot_sessions WHERE wa_id=?",
+            (wa_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def set_bot_session(wa_id: str, stage: str, branch: str = "") -> None:
+    with _write_lock, closing(_conn()) as c, c:
+        c.execute(
+            "INSERT INTO bot_sessions(wa_id,stage,branch,updated_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(wa_id) DO UPDATE SET stage=excluded.stage, "
+            "branch=excluded.branch, updated_at=excluded.updated_at",
+            (wa_id, stage, branch, int(time.time())),
+        )
 
 
 def get_user(wa_id: str) -> User | None:
