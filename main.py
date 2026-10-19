@@ -143,15 +143,17 @@ async def branch_menu(greeting: bool = False) -> str:
     heading = "👋 *WELCOME TO LORA RETURNS CONNECT*\n\n" if greeting else ""
     if not branches:
         return (
-            f"{heading}📦 *STOCK SENT TODAY*\n\n"
-            "I couldn't find any branches in the live stock system. Please try again later."
+            f"{heading}📦 *STOCK SENT TODAY*\n"
+            "🏬 *SELECT YOUR BRANCH*\n\n"
+            "No branches are available right now. Please try again later or type MENU to restart."
         )
     lines = [
-        f"{heading}📦 *STOCK SENT TODAY*\n🏬 *CHOOSE A BRANCH*\n\n",
-        "Select a branch to view today's transfers:\n\n",
+        f"{heading}📦 *STOCK SENT TODAY*\n"
+        "🏬 *SELECT YOUR BRANCH*\n\n"
+        "Choose a branch to see what was sent today:\n\n",
     ]
-    lines.extend(f"🏪 *{index}. {name}*\n" for index, name in enumerate(branches, start=1))
-    lines.append("\nReply with a branch number or exact name.\nType MENU to start again.")
+    lines.extend(f"{index}️⃣ *{name}*\n" for index, name in enumerate(branches, start=1))
+    lines.append("\nReply with the branch number to continue.\nType MENU anytime to start again.")
     return "".join(lines)
 
 
