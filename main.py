@@ -231,8 +231,11 @@ async def stock_menu_reply(sender_id: str, user_text: str) -> str:
             )
         set_bot_session(sender_id, "choose_action", selected)
         return (
-            f"You selected {selected}. What would you like to do?\n"
-            "1. See what stock was transferred to this branch"
+            f"📦 *STOCK SENT TODAY*\n🏬 *{selected}*\n\n"
+            "Choose an option:\n\n"
+            "1️⃣ *View today's stock transfers*\n"
+            "2️⃣ *Choose another branch*\n\n"
+            "Reply with 1 or 2, or type MENU to start again."
         )
 
     branch = session.get("branch", "")
