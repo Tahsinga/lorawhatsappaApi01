@@ -155,21 +155,27 @@ async def branch_menu(greeting: bool = False) -> str:
     return "".join(lines)
 
 
-def transfer_reply(branch: str, transfer_date: str, transfers: list[dict[str, Any]]) -> list[str]:
+def transfer_reply(
+    branch: str,
+    transfer_date: str,
+    transfers: list[dict[str, Any]],
+    is_today: bool = True,
+) -> list[str]:
     try:
         display_date = datetime.fromisoformat(transfer_date).strftime("%A, %d %B %Y")
     except ValueError:
         display_date = transfer_date
+    report_title = "STOCK SENT TODAY" if is_today else "STOCK TRANSFERS FOR SELECTED DATE"
     if not transfers:
         return [
-            f"📦 *STOCK SENT TODAY*\n🏬 *{branch}*\n📅 {display_date}\n\n"
-            "No stock transfers were sent to this branch today.\n\n"
-            "Reply 1 to check again, 2 to choose another branch, or MENU to start again."
+            f"📦 *{report_title}*\n🏬 *{branch}*\n📅 {display_date}\n\n"
+            "No stock transfers were found for this branch and date.\n\n"
+            "Reply 1 for today's transfers, 2 to choose a date, 3 to change branch, or MENU to start again."
         ]
 
     total_quantity = sum(int(Decimal(str(item.get("quantity", 0)))) for item in transfers)
     heading = (
-        f"📦 *STOCK SENT TODAY*\n🏬 *{branch}*\n📅 {display_date}\n"
+        f"📦 *{report_title}*\n🏬 *{branch}*\n📅 {display_date}\n"
         f"📊 {len(transfers)} deliveries · {total_quantity} units total\n\n"
     )
     entries = []
@@ -189,13 +195,13 @@ def transfer_reply(branch: str, transfer_date: str, transfers: list[dict[str, An
 
     pages = []
     current = heading
-    continued_heading = f"📦 *STOCK SENT TODAY · CONTINUED*\n🏬 *{branch}*\n📅 {display_date}\n\n"
+    continued_heading = f"📦 *{report_title} · CONTINUED*\n🏬 *{branch}*\n📅 {display_date}\n\n"
     for entry in entries:
         if len(current) + len(entry) > 3300:
             pages.append(current.rstrip())
             current = continued_heading
         current += entry + "\n"
-    current += "Reply 1 to refresh, 2 to choose another branch, or MENU to start again."
+    current += "Reply 1 for today's transfers, 2 to choose a date, 3 to change branch, or MENU to start again."
     pages.append(current.rstrip())
     return pages
 
@@ -234,18 +240,52 @@ async def stock_menu_reply(sender_id: str, user_text: str) -> str:
             f"📦 *STOCK SENT TODAY*\n🏬 *{selected}*\n\n"
             "Choose an option:\n\n"
             "1️⃣ *View today's stock transfers*\n"
-            "2️⃣ *Choose another branch*\n\n"
-            "Reply with 1 or 2, or type MENU to start again."
+            "2️⃣ *Choose a date*\n"
+            "3️⃣ *Choose another branch*\n\n"
+            "Reply with 1, 2, or 3, or type MENU to start again."
         )
 
     branch = session.get("branch", "")
-    if normalized in {"2", "branch", "change branch"}:
+    if session["stage"] == "choose_date":
+        if normalized in {"3", "branch", "change branch"}:
+            set_bot_session(sender_id, "choose_branch")
+            try:
+                return await branch_menu()
+            except Exception:
+                log.exception("Failed to load branches from live stock API")
+                return "I can't reach the live stock system right now. Please try again shortly."
+        try:
+            selected_date = datetime.strptime(user_text.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            return "Please send the date as YYYY-MM-DD, for example 2026-10-19. Or reply 3 to change branch."
+        try:
+            payload = await fetch_stock_data({"branch": branch, "date": selected_date.isoformat()})
+            return transfer_reply(
+                branch,
+                payload.get("date", selected_date.isoformat()),
+                payload.get("transfers", []),
+                is_today=False,
+            )
+        except Exception:
+            log.exception("Failed to load dated branch transfers from live stock API")
+            return "I can't load transfers for that date right now. Please try again shortly."
+
+    if normalized in {"3", "branch", "change branch"}:
         set_bot_session(sender_id, "choose_branch")
         try:
             return await branch_menu()
         except Exception:
             log.exception("Failed to load branches from live stock API")
             return "I can't reach the live stock system right now. Please try again shortly."
+    if normalized == "2":
+        set_bot_session(sender_id, "choose_date", branch)
+        return (
+            f"📅 *CHOOSE A DATE*\n🏬 *{branch}*\n\n"
+            "Send the date you want to check in this format:\n"
+            "YYYY-MM-DD\n\n"
+            "Example: 2026-10-19\n"
+            "Reply 3 to choose another branch, or MENU to start again."
+        )
     if normalized in {"1", "transfers", "transfer", "stock", "view", "see"}:
         try:
             payload = await fetch_stock_data({"branch": branch})
@@ -254,7 +294,7 @@ async def stock_menu_reply(sender_id: str, user_text: str) -> str:
             log.exception("Failed to load branch transfers from live stock API")
             return "I can't load transfers from the live stock system right now. Please try again shortly."
     return (
-        "Reply 1 to see transfers for this branch, 2 to choose another branch, "
+        "Reply 1 for today's transfers, 2 to choose a date, 3 to change branch, "
         "or MENU to start again."
     )
 
