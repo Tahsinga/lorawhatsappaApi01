@@ -109,7 +109,7 @@ llm = AsyncOpenAI(api_key=required_env("MODEL_API_KEY"))
 MODEL_ID = os.getenv("MODEL_ID", "gpt-4o-mini")
 STOCK_API_URL = os.getenv(
     "LORA_STOCK_API_URL",
-    "https://laxdomloraapi.onrender.com/api/whatsapp/stock/",
+    "https://loraapi01.onrender.com/api/whatsapp/stock/",
 ).rstrip("/") + "/"
 STOCK_API_TOKEN = os.getenv("WHATSAPP_STOCK_API_TOKEN", "")
 SYSTEM_PROMPT = (
