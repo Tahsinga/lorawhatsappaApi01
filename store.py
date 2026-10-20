@@ -23,6 +23,7 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).with_name("stock.db")
 _write_lock = threading.Lock()
+BOT_SESSION_TIMEOUT_SECONDS = 5 * 60
 
 # ---------------------------------------------------------------------------
 # EDIT THESE. wa_id = the sender's WhatsApp number in full international
@@ -135,10 +136,31 @@ def list_conversations(limit: int = 100):
 def get_bot_session(wa_id: str):
     with closing(_conn()) as c:
         row = c.execute(
-            "SELECT stage, branch FROM bot_sessions WHERE wa_id=?",
+            "SELECT stage, branch, updated_at FROM bot_sessions WHERE wa_id=?",
             (wa_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def is_bot_session_expired(updated_at: int, now: float | None = None) -> bool:
+    """Return whether a bot session has been inactive for five minutes."""
+    current_time = time.time() if now is None else now
+    return current_time - updated_at >= BOT_SESSION_TIMEOUT_SECONDS
+
+
+def touch_bot_session(wa_id: str) -> None:
+    """Record that a user sent a message during their current bot session."""
+    with _write_lock, closing(_conn()) as c, c:
+        c.execute(
+            "UPDATE bot_sessions SET updated_at=? WHERE wa_id=?",
+            (time.time(), wa_id),
+        )
+
+
+def clear_bot_session(wa_id: str) -> None:
+    """Remove a user's bot session after it times out."""
+    with _write_lock, closing(_conn()) as c, c:
+        c.execute("DELETE FROM bot_sessions WHERE wa_id=?", (wa_id,))
 
 
 def set_bot_session(wa_id: str, stage: str, branch: str = "") -> None:
@@ -147,7 +169,7 @@ def set_bot_session(wa_id: str, stage: str, branch: str = "") -> None:
             "INSERT INTO bot_sessions(wa_id,stage,branch,updated_at) VALUES(?,?,?,?) "
             "ON CONFLICT(wa_id) DO UPDATE SET stage=excluded.stage, "
             "branch=excluded.branch, updated_at=excluded.updated_at",
-            (wa_id, stage, branch, int(time.time())),
+            (wa_id, stage, branch, time.time()),
         )
 
 

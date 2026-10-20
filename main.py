@@ -10,6 +10,7 @@ Run:
   uvicorn main:fastapi_app --host 0.0.0.0 --port 8000 --reload
 """
 
+import asyncio
 import base64
 import logging
 import mimetypes
@@ -29,7 +30,17 @@ from pywa_async import WhatsApp, types
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from store import get_bot_session, init_db, list_conversations, log_conversation, set_bot_session
+from store import (
+    BOT_SESSION_TIMEOUT_SECONDS,
+    clear_bot_session,
+    get_bot_session,
+    init_db,
+    is_bot_session_expired,
+    list_conversations,
+    log_conversation,
+    set_bot_session,
+    touch_bot_session,
+)
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
 logging.basicConfig(
@@ -334,6 +345,39 @@ async def extract_receipt_text(image_bytes: bytes, mime_type: str = "image/jpeg"
     return (resp.choices[0].message.content or "").strip()
 
 
+SESSION_TIMEOUT_REPLY = (
+    "⏳ Your session has timed out after 5 minutes of inactivity. "
+    "Send any message to start again."
+)
+_session_timeout_tasks: dict[str, asyncio.Task[None]] = {}
+
+
+async def _notify_session_timeout(sender_id: str, updated_at: float) -> None:
+    try:
+        await asyncio.sleep(BOT_SESSION_TIMEOUT_SECONDS)
+        session = get_bot_session(sender_id)
+        if not session or session["updated_at"] != updated_at:
+            return
+
+        clear_bot_session(sender_id)
+        await wa.send_message(to=sender_id, text=SESSION_TIMEOUT_REPLY)
+        log_conversation(sender_id, "outgoing", "text", SESSION_TIMEOUT_REPLY)
+    except Exception:
+        log.exception("Failed to send WhatsApp session timeout notification")
+    finally:
+        if _session_timeout_tasks.get(sender_id) is asyncio.current_task():
+            _session_timeout_tasks.pop(sender_id, None)
+
+
+def _schedule_session_timeout(sender_id: str, updated_at: float) -> None:
+    previous_task = _session_timeout_tasks.get(sender_id)
+    if previous_task:
+        previous_task.cancel()
+    _session_timeout_tasks[sender_id] = asyncio.create_task(
+        _notify_session_timeout(sender_id, updated_at)
+    )
+
+
 # --- Handle every incoming text, image, and audio message ------------------
 @wa.on_message()  # type: ignore[arg-type]  # pywa async-stub quirk; verified correct at runtime
 async def handle_message(_: WhatsApp, msg: types.Message):
@@ -347,6 +391,22 @@ async def handle_message(_: WhatsApp, msg: types.Message):
         "Audio received" if msg.audio is not None else
         "Unsupported message"
     )
+
+    session = get_bot_session(sender_id)
+    if session and is_bot_session_expired(session["updated_at"]):
+        log_conversation(sender_id, "incoming", incoming_type, incoming_body)
+        clear_bot_session(sender_id)
+        try:
+            await msg.reply_text(SESSION_TIMEOUT_REPLY)
+            log_conversation(sender_id, "outgoing", "text", SESSION_TIMEOUT_REPLY)
+        except Exception:
+            log.exception("Failed to send timed-out session reply to WhatsApp")
+        return
+    if session:
+        touch_bot_session(sender_id)
+        refreshed_session = get_bot_session(sender_id)
+        if refreshed_session:
+            _schedule_session_timeout(sender_id, refreshed_session["updated_at"])
 
     if msg.image is not None:
         image_logged = False
@@ -410,6 +470,10 @@ async def handle_message(_: WhatsApp, msg: types.Message):
     except Exception:
         log.exception("WhatsApp stock menu failed")
         reply = "Sorry, I hit a snag. Please try again in a moment."
+
+    session = get_bot_session(sender_id)
+    if session:
+        _schedule_session_timeout(sender_id, session["updated_at"])
 
     try:
         replies = reply if isinstance(reply, list) else [reply]
