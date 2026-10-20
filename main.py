@@ -109,9 +109,23 @@ llm = AsyncOpenAI(api_key=required_env("MODEL_API_KEY"))
 MODEL_ID = os.getenv("MODEL_ID", "gpt-4o-mini")
 STOCK_API_URL = os.getenv(
     "LORA_STOCK_API_URL",
-    "https://loraapi01.onrender.com/api/whatsapp/stock/",
+    "https://laxdomloraapi.onrender.com/api/whatsapp/stock/",
 ).rstrip("/") + "/"
 STOCK_API_TOKEN = os.getenv("WHATSAPP_STOCK_API_TOKEN", "")
+STOCK_BRANCHES = (
+    "COMPLEX",
+    "CROSS COUNTRY",
+    "DZOVANI",
+    "INVESTMENTS",
+    "Mini Market",
+    "PERFECT",
+    "SISK",
+    "The Place",
+    "VEES",
+    "WEST",
+    "YEUKAI",
+    "ZBS",
+)
 SYSTEM_PROMPT = (
     "You are a helpful assistant for a WhatsApp business bot. "
     "Reply warmly and briefly, and acknowledge the user message." 
@@ -149,8 +163,7 @@ async def fetch_stock_data(params: dict[str, str]) -> dict[str, Any]:
 
 
 async def branch_menu(greeting: bool = False) -> str:
-    payload = await fetch_stock_data({"action": "branches"})
-    branches = payload.get("branches", [])
+    branches = STOCK_BRANCHES
     heading = "👋 *WELCOME TO LORA RETURNS CONNECT*\n\n" if greeting else ""
     if not branches:
         return (
@@ -232,11 +245,7 @@ async def stock_menu_reply(sender_id: str, user_text: str) -> str:
             return "Hi! Welcome to Lora Returns Connect. I can't reach the live stock system right now. Please try again shortly."
 
     if session["stage"] == "choose_branch":
-        try:
-            branches = (await fetch_stock_data({"action": "branches"})).get("branches", [])
-        except Exception:
-            log.exception("Failed to load branches from live stock API")
-            return "I can't reach the live stock system right now. Please try again shortly."
+        branches = STOCK_BRANCHES
         selected = None
         if normalized.isdigit():
             index = int(normalized) - 1
