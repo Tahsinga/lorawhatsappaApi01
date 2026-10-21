@@ -3,6 +3,7 @@ services:
     name: whatsapp-api
     runtime: python
     plan: starter
+    rootDir: .
     buildCommand: pip install -r requirements.txt && python dashboard/config/manage.py collectstatic --noinput
     startCommand: python dashboard/config/manage.py migrate --noinput && uvicorn main:fastapi_app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
