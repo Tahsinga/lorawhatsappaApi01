@@ -16,5 +16,9 @@ venv/
 # Logs
 *.log
 
+# Runtime data and collected static assets
+media/
+dashboard/config/staticfiles/
+
 # Uvicorn reload files
 *.pyc

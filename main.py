@@ -15,6 +15,7 @@ import base64
 import logging
 import mimetypes
 import os
+import sys
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
+from asgiref.wsgi import WsgiToAsgi
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -43,18 +45,19 @@ from store import (
 )
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
+DEBUG = os.getenv("DEBUG", "true").lower() in ("true", "1", "yes")
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.DEBUG if DEBUG else logging.INFO,
     handlers=[
         logging.StreamHandler(),
     ],
 )
 log = logging.getLogger("wa-bot")
-log.setLevel(logging.DEBUG)
-if not any(isinstance(handler, logging.FileHandler) for handler in log.handlers):
+log.setLevel(logging.DEBUG if DEBUG else logging.INFO)
+if DEBUG and not any(isinstance(handler, logging.FileHandler) for handler in log.handlers):
     log.addHandler(logging.FileHandler(Path(__file__).with_name("webhook.log"), encoding="utf-8"))
 
-MEDIA_DIR = Path(__file__).with_name("media")
+MEDIA_DIR = Path(os.getenv("WHATSAPP_MEDIA_DIR", str(Path(__file__).with_name("media"))))
 
 
 def required_env(name: str) -> str:
@@ -104,6 +107,26 @@ wa = WhatsApp(
     validate_updates=bool(_app_secret),          # signature check on if secret is set
 )
 
+for webhook_method in ("GET", "POST"):
+    webhook_route = next(
+        (
+            route
+            for route in fastapi_app.routes
+            if getattr(route, "path", None) == "/webhook"
+            and webhook_method in getattr(route, "methods", set())
+        ),
+        None,
+    )
+    if webhook_route is None:
+        raise RuntimeError(f"PyWa did not register its {webhook_method} webhook route.")
+    fastapi_app.add_api_route(
+        "/webhook/",
+        webhook_route.endpoint,
+        methods=[webhook_method],
+        include_in_schema=False,
+        name=f"pywa_webhook_trailing_slash_{webhook_method.lower()}",
+    )
+
 # --- The brain: GPT-4o Mini via OpenAI API -----------------------------
 llm = AsyncOpenAI(api_key=required_env("MODEL_API_KEY"))
 MODEL_ID = os.getenv("MODEL_ID", "gpt-4o-mini")
@@ -119,6 +142,7 @@ STOCK_BRANCHES = (
     "INVESTMENTS",
     "Mini Market",
     "PERFECT",
+    "RUJEKO B",
     "SISK",
     "The Place",
     "VEES",
@@ -167,56 +191,55 @@ async def branch_menu(greeting: bool = False) -> str:
     heading = "👋 *WELCOME TO LORA RETURNS CONNECT*\n\n" if greeting else ""
     if not branches:
         return (
-            f"{heading}📦 *STOCK SENT TODAY*\n"
+            f"{heading}📦 *STOCK RECEIVED TODAY*\n"
             "🏬 *SELECT YOUR BRANCH*\n\n"
             "No branches are available right now. Please try again later or type MENU to restart."
         )
     lines = [
-        f"{heading}📦 *STOCK SENT TODAY*\n"
+        f"{heading}📦 *STOCK RECEIVED TODAY*\n"
         "🏬 *SELECT YOUR BRANCH*\n\n"
-        "Choose a branch to see what was sent today:\n\n",
+        "Choose a branch to see what stock was received today:\n\n",
     ]
     lines.extend(f"{index}️⃣ *{name}*\n" for index, name in enumerate(branches, start=1))
     lines.append("\nReply with the branch number to continue.\nType MENU anytime to start again.")
     return "".join(lines)
 
 
-def transfer_reply(
+def received_stock_reply(
     branch: str,
-    transfer_date: str,
-    transfers: list[dict[str, Any]],
+    received_date: str,
+    receipts: list[dict[str, Any]],
     is_today: bool = True,
 ) -> list[str]:
     try:
-        display_date = datetime.fromisoformat(transfer_date).strftime("%A, %d %B %Y")
+        display_date = datetime.fromisoformat(received_date).strftime("%A, %d %B %Y")
     except ValueError:
-        display_date = transfer_date
-    report_title = "STOCK SENT TODAY" if is_today else "STOCK TRANSFERS FOR SELECTED DATE"
-    if not transfers:
+        display_date = received_date
+    report_title = "STOCK RECEIVED TODAY" if is_today else "STOCK RECEIVED FOR SELECTED DATE"
+    if not receipts:
         return [
             f"📦 *{report_title}*\n🏬 *{branch}*\n📅 {display_date}\n\n"
-            "No stock transfers were found for this branch and date.\n\n"
-            "Reply 1 for today's transfers, 2 to choose a date, 3 to change branch, or MENU to start again."
+            "No stock was received by this branch on this date.\n\n"
+            "Reply 1 for today's received stock, 2 to choose a date, 3 to change branch, or MENU to start again."
         ]
 
-    total_quantity = sum(int(Decimal(str(item.get("quantity", 0)))) for item in transfers)
+    total_quantity = sum(int(Decimal(str(item.get("quantity", 0)))) for item in receipts)
     heading = (
         f"📦 *{report_title}*\n🏬 *{branch}*\n📅 {display_date}\n"
-        f"📊 {len(transfers)} deliveries · {total_quantity} units total\n\n"
+        f"📊 {len(receipts)} items received · {total_quantity} units total\n\n"
     )
     entries = []
-    for transfer in transfers:
-        product = transfer.get("product_name") or f"Product {transfer.get('product_id', '')}"
-        timestamp = str(transfer.get("sent_at", ""))
+    for receipt in receipts:
+        product = receipt.get("product_name") or f"Product {receipt.get('product_id', '')}"
+        timestamp = str(receipt.get("received_at", ""))
         try:
             timestamp = datetime.fromisoformat(timestamp).strftime("%I:%M %p").lstrip("0")
         except ValueError:
             timestamp = "Time unavailable"
-        status = str(transfer.get("status", "sent")).replace("_", " ").title()
         entries.append(
             f"📦 *{product}*\n"
-            f"   Quantity: *{transfer.get('quantity', '?')}*\n"
-            f"   Sent: *{timestamp}* · {status}\n"
+            f"   Quantity: *{receipt.get('quantity', '?')}*\n"
+            f"   Received: *{timestamp}*\n"
         )
 
     pages = []
@@ -227,7 +250,7 @@ def transfer_reply(
             pages.append(current.rstrip())
             current = continued_heading
         current += entry + "\n"
-    current += "Reply 1 for today's transfers, 2 to choose a date, 3 to change branch, or MENU to start again."
+    current += "Reply 1 for today's received stock, 2 to choose a date, 3 to change branch, or MENU to start again."
     pages.append(current.rstrip())
     return pages
 
@@ -259,9 +282,9 @@ async def stock_menu_reply(sender_id: str, user_text: str) -> str:
             )
         set_bot_session(sender_id, "choose_action", selected)
         return (
-            f"📦 *STOCK SENT TODAY*\n🏬 *{selected}*\n\n"
+            f"📦 *STOCK RECEIVED TODAY*\n🏬 *{selected}*\n\n"
             "Choose an option:\n\n"
-            "1️⃣ *View today's stock transfers*\n"
+            "1️⃣ *View today's received stock*\n"
             "2️⃣ *Choose a date*\n"
             "3️⃣ *Choose another branch*\n\n"
             "Reply with 1, 2, or 3, or type MENU to start again."
@@ -281,16 +304,20 @@ async def stock_menu_reply(sender_id: str, user_text: str) -> str:
         except ValueError:
             return "Please send the date as YYYY-MM-DD, for example 2026-10-19. Or reply 3 to change branch."
         try:
-            payload = await fetch_stock_data({"branch": branch, "date": selected_date.isoformat()})
-            return transfer_reply(
+            payload = await fetch_stock_data({
+                "action": "received",
+                "branch": branch,
+                "date": selected_date.isoformat(),
+            })
+            return received_stock_reply(
                 branch,
                 payload.get("date", selected_date.isoformat()),
-                payload.get("transfers", []),
+                payload.get("receipts", []),
                 is_today=False,
             )
         except Exception:
-            log.exception("Failed to load dated branch transfers from live stock API")
-            return "I can't load transfers for that date right now. Please try again shortly."
+            log.exception("Failed to load dated branch receipts from live stock API")
+            return "I can't load received stock for that date right now. Please try again shortly."
 
     if normalized in {"3", "branch", "change branch"}:
         set_bot_session(sender_id, "choose_branch")
@@ -308,15 +335,19 @@ async def stock_menu_reply(sender_id: str, user_text: str) -> str:
             "Example: 2026-10-19\n"
             "Reply 3 to choose another branch, or MENU to start again."
         )
-    if normalized in {"1", "transfers", "transfer", "stock", "view", "see"}:
+    if normalized in {"1", "received", "receipts", "stock", "view", "see"}:
         try:
-            payload = await fetch_stock_data({"branch": branch})
-            return transfer_reply(branch, payload.get("date", "Today"), payload.get("transfers", []))
+            payload = await fetch_stock_data({"action": "received", "branch": branch})
+            return received_stock_reply(
+                branch,
+                payload.get("date", "Today"),
+                payload.get("receipts", []),
+            )
         except Exception:
-            log.exception("Failed to load branch transfers from live stock API")
-            return "I can't load transfers from the live stock system right now. Please try again shortly."
+            log.exception("Failed to load branch receipts from live stock API")
+            return "I can't load received stock from the live stock system right now. Please try again shortly."
     return (
-        "Reply 1 for today's transfers, 2 to choose a date, 3 to change branch, "
+        "Reply 1 for today's received stock, 2 to choose a date, 3 to change branch, "
         "or MENU to start again."
     )
 
@@ -424,7 +455,7 @@ async def handle_message(_: WhatsApp, msg: types.Message):
             mime_type = msg.image.mime_type or "image/jpeg"
             extension = mimetypes.guess_extension(mime_type) or ".jpg"
             filename = f"{uuid.uuid4().hex}{extension}"
-            MEDIA_DIR.mkdir(exist_ok=True)
+            MEDIA_DIR.mkdir(parents=True, exist_ok=True)
             (MEDIA_DIR / filename).write_bytes(image_bytes)
             log_conversation(sender_id, "incoming", incoming_type, filename)
             image_logged = True
@@ -449,7 +480,7 @@ async def handle_message(_: WhatsApp, msg: types.Message):
             mime_type = msg.audio.mime_type or "audio/ogg"
             extension = mimetypes.guess_extension(mime_type) or ".ogg"
             filename = f"{uuid.uuid4().hex}{extension}"
-            MEDIA_DIR.mkdir(exist_ok=True)
+            MEDIA_DIR.mkdir(parents=True, exist_ok=True)
             (MEDIA_DIR / filename).write_bytes(audio_bytes)
             log_conversation(sender_id, "incoming", "audio", filename)
             audio_logged = True
@@ -505,7 +536,7 @@ async def favicon():
 
 @fastapi_app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
-    return HTMLResponse(DASHBOARD_HTML)
+    return RedirectResponse(url="/control-room/")
 
 
 @fastapi_app.get("/dashboard/messages")
@@ -543,6 +574,15 @@ loadMessages();setInterval(loadMessages,5000);
 @fastapi_app.get("/health")
 async def health():
     return {"status": "ok", "model": MODEL_ID}
+
+
+dashboard_project = Path(__file__).with_name("dashboard") / "config"
+sys.path.insert(0, str(dashboard_project))
+os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
+
+from django.core.wsgi import get_wsgi_application
+
+fastapi_app.mount("/", WsgiToAsgi(get_wsgi_application()), name="whatsapp-control-room")
 
 
 # --- Let `python main.py` start the server (same as the uvicorn command) -----

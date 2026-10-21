@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: whatsapp-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt && python dashboard/config/manage.py collectstatic --noinput
+    startCommand: python dashboard/config/manage.py migrate --noinput && uvicorn main:fastapi_app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: whatsapp-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DB_PATH
+        value: /var/data/django.sqlite3
+      - key: WHATSAPP_DB_PATH
+        value: /var/data/stock.db
+      - key: WHATSAPP_MEDIA_DIR
+        value: /var/data/media
+      - key: WA_PHONE_ID
+        sync: false
+      - key: WA_TOKEN
+        sync: false
+      - key: WA_VERIFY_TOKEN
+        sync: false
+      - key: MODEL_API_KEY
+        sync: false
+      - key: WHATSAPP_STOCK_API_TOKEN
+        sync: false
+      - key: LORA_STOCK_API_URL
+        value: https://laxdomloraapi.onrender.com/api/whatsapp/stock/

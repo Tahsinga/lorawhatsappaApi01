@@ -20,6 +20,7 @@ from django.urls import path
 from webui import views
 
 urlpatterns = [
+    path('control-room/', views.inbox, name='control_room'),
     path('', views.inbox, name='inbox'),
     path('api/messages/', views.messages_api, name='messages_api'),
     path('api/reply/', views.reply_api, name='reply_api'),

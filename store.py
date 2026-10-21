@@ -17,11 +17,12 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
+import os
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-DB_PATH = Path(__file__).with_name("stock.db")
+DB_PATH = Path(os.getenv("WHATSAPP_DB_PATH", str(Path(__file__).with_name("stock.db"))))
 _write_lock = threading.Lock()
 BOT_SESSION_TIMEOUT_SECONDS = 5 * 60
 
@@ -54,6 +55,7 @@ def _conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _write_lock, closing(_conn()) as c, c:
         c.executescript(
             """

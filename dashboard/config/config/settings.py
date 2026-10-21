@@ -20,17 +20,34 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_DIR = BASE_DIR.parent.parent
 load_dotenv(PROJECT_DIR / '.env', override=False)
 
+DEBUG = os.getenv('DEBUG', 'true').lower() in ('true', '1', 'yes')
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    if not DEBUG:
+        raise RuntimeError('DJANGO_SECRET_KEY must be set when DEBUG is disabled.')
+    SECRET_KEY = 'django-insecure-local-development-only'
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+WHATSAPP_DASHBOARD_HOST = os.getenv('WHATSAPP_DASHBOARD_HOST', '').strip()
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'testserver']
+ALLOWED_HOSTS.extend(
+    host.strip()
+    for host in os.getenv('ALLOWED_HOSTS', '').split(',')
+    if host.strip()
+)
+render_hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME', '').strip()
+if render_hostname:
+    ALLOWED_HOSTS.append(render_hostname)
+if WHATSAPP_DASHBOARD_HOST:
+    ALLOWED_HOSTS.append(WHATSAPP_DASHBOARD_HOST)
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-o0h9y+4l@7&hxnupg8f4959ipa6(#p(=19#(0$k91m0)89rw#m'
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'testserver', '192.168.110.87']
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+for host in (render_hostname, WHATSAPP_DASHBOARD_HOST):
+    if host:
+        CSRF_TRUSTED_ORIGINS.append(f'https://{host}')
 
 
 # Application definition
@@ -47,6 +64,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -81,7 +99,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': os.getenv('DJANGO_DB_PATH', str(BASE_DIR / 'db.sqlite3')),
     }
 }
 
@@ -121,10 +139,25 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 # The bot stores webhook conversations in the project-level SQLite database.
-WHATSAPP_DB_PATH = BASE_DIR.parent.parent / 'stock.db'
-WHATSAPP_MEDIA_DIR = PROJECT_DIR / 'media'
+WHATSAPP_DB_PATH = Path(os.getenv(
+    'WHATSAPP_DB_PATH',
+    str(BASE_DIR.parent.parent / 'stock.db'),
+))
+WHATSAPP_MEDIA_DIR = Path(os.getenv(
+    'WHATSAPP_MEDIA_DIR',
+    str(PROJECT_DIR / 'media'),
+))
 WA_PHONE_ID = os.getenv('WA_PHONE_ID', '')
 WA_TOKEN = os.getenv('WA_TOKEN', '')
 
